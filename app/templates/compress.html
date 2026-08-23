@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Compress PDF — PDF Toolkit{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-12">
+  <div class="text-center mb-8">
+    <h1 class="text-2xl sm:text-3xl font-bold text-ink-900 tracking-tight">Compress PDF</h1>
+    <p class="mt-2 text-sm sm:text-base text-ink-500">Reduce your PDF's file size while keeping it readable — perfect for email and faster uploads.</p>
+  </div>
+
+  <div class="bg-white border border-ink-100 rounded-xl shadow-sm p-6 sm:p-8">
+    <!-- Error message area -->
+    <div id="error-area" class="hidden mb-4 px-4 py-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm" role="alert"></div>
+
+    <!-- File input -->
+    <div class="mb-4">
+      <label for="pdf-input" class="block text-sm font-medium text-ink-700 mb-2">Select PDF file</label>
+      <input
+        id="pdf-input"
+        type="file"
+        accept="application/pdf"
+        class="block w-full text-sm text-ink-700 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-accent-50 file:text-accent-700 hover:file:bg-accent-100 file:transition file:border file:border-accent-100 cursor-pointer bg-white border border-ink-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent-400 focus:border-accent-400"
+      />
+      <p class="mt-2 text-xs text-ink-400">Only PDF files are supported. Max 25 MB.</p>
+    </div>
+
+    <!-- File preview -->
+    <div id="file-preview" class="hidden mb-6 p-4 bg-ink-50 border border-ink-100 rounded-lg">
+      <div class="flex items-center gap-3">
+        <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-accent-50 border border-accent-100 flex items-center justify-center text-accent-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 3a2 2 0 00-2 2v14a2 2 0 002 2h7a2 2 0 002-2V9a2 2 0 00-2-2h-1.5a1 1 0 01-.7-.3L10.3 5.3A1 1 0 009.6 5H7z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v6"></path></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p id="preview-name" class="text-sm font-medium text-ink-900 truncate"></p>
+          <p id="preview-size" class="text-xs text-ink-500"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Compress button -->
+    <button
+      id="compress-btn"
+      type="button"
+      disabled
+      class="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-accent-600 text-white text-sm font-medium hover:bg-accent-700 disabled:bg-ink-200 disabled:text-ink-400 disabled:cursor-not-allowed transition shadow-sm"
+    >
+      <span id="btn-text">Compress PDF</span>
+      <svg id="btn-spinner" class="hidden w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+    </button>
+
+    <p class="mt-4 text-center text-xs text-ink-400">Your file never leaves your browser unencrypted — processing is done on the server and the result is downloaded immediately.</p>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/compress.js') }}"></script>
+{% endblock %}

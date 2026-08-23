@@ -64,7 +64,38 @@ npm run watch:css
 cp .env.example .env
 ```
 
-Edit `.env` and set a secure `SECRET_KEY` for production.
+`.env.example` contains:
+
+```
+SECRET_KEY=change-me
+MAX_CONTENT_LENGTH=26214400
+FLASK_DEBUG=1
+```
+
+* `FLASK_DEBUG=1` is **local-dev only** — do not set it in production (`wsgi.py` is used via Passenger). Debug mode enables auto-reload, verbose tracebacks, and the Werkzeug interactive debugger (arbitrary code execution if exposed). In production use `FLASK_DEBUG=0` or unset it.
+* Generate a secure `SECRET_KEY` — Flask uses it to HMAC-sign session cookies, `flash` messages, and CSRF tokens; a weak/predictable key allows session forgery:
+
+  **macOS / Linux:**
+
+  ```bash
+  python3 -c "import secrets; print(secrets.token_hex(32))"
+  # alternative: openssl rand -hex 32
+  ```
+
+  **Windows (PowerShell):**
+
+  ```powershell
+  python -c "import secrets; print(secrets.token_hex(32))"
+  # alternative URL-safe: python -c "import secrets; print(secrets.token_urlsafe(32))"
+  ```
+
+  Copy the 64-hex-char output (32 bytes / 256-bit) into `.env`:
+
+  ```
+  SECRET_KEY=<paste output>
+  ```
+
+  Keep different keys per environment and never commit `.env` (it is in `.gitignore`). The placeholder `change-me` and the fallback `dev-secret-key-change-me` in `app/config.py` are dev-only.
 
 ### 6. Run the application (For local dev environment - for production check [Deployment](#7-deployment))
 

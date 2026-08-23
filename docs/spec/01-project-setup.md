@@ -88,9 +88,9 @@ README.md
 
 8. **`.gitignore`**: `venv/`, `__pycache__/`, `node_modules/`, `app/static/css/dist/output.css`, `.env`, `instance/`, `*.pyc`.
 
-9. **`.env.example`**: `SECRET_KEY=change-me`, `MAX_CONTENT_LENGTH=26214400` (25MB in bytes), `FLASK_DEBUG=1`.
+9. **`.env.example`**: `SECRET_KEY=change-me`, `MAX_CONTENT_LENGTH=26214400` (25MB in bytes), `FLASK_DEBUG=1` — `FLASK_DEBUG=1` is **local-dev only** (enables auto-reload + Werkzeug interactive debugger; must be `0`/unset in production via `wsgi.py`). `SECRET_KEY` is the HMAC key Flask uses to sign session cookies/`flash`/CSRF tokens — the placeholder `change-me` (and `dev-secret-key-change-me` fallback in `app/config.py`) is dev-only and must be replaced with a cryptographically strong value: `python -c "import secrets; print(secrets.token_hex(32))"` (64 hex chars = 32 bytes / 256-bit, `secrets.token_urlsafe(32)` or `openssl rand -hex 32` as alternatives), different per environment, never committed (`.env` is in `.gitignore`).
 
-10. **`README.md`** (stub, expanded fully in Step 5): project name/one-line description, and exact setup commands in order: create venv → activate → `pip install -r requirements.txt` → `npm install` → `npm run build:css` → copy `.env.example` to `.env` → `python app.py` (or `flask run`).
+10. **`README.md`** (stub, expanded fully in Step 5): project name/one-line description, and exact setup commands in order: create venv → activate → `pip install -r requirements.txt` → `npm install` → `npm run build:css` → copy `.env.example` to `.env` → generate `SECRET_KEY` via `secrets` (`python -c "import secrets; print(secrets.token_hex(32))"` / `openssl rand -hex 32`) and paste into `.env` → `python app.py` (or `flask run`). Must document that `FLASK_DEBUG=1` is local-dev only (debug auto-reload + interactive debugger → RCE if exposed; production `0`/unset via `wsgi.py`) and how to generate `SECRET_KEY` securely (32 bytes / `secrets` CSPRNG, per-env, never committed).
 
 ## Definition of Done
 - [ ] `python -m venv venv` + activation works; `pip install -r requirements.txt` succeeds with no errors
