@@ -1,0 +1,12 @@
+{
+  "name": "pdf-tools-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./app/static/css/src/input.css -o ./app/static/css/dist/output.css",
+    "watch:css": "tailwindcss -i ./app/static/css/src/input.css -o ./app/static/css/dist/output.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.19"
+  }
+}

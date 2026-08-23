@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+node_modules/
+app/static/css/dist/output.css
+.env
+instance/
+*.pyc
