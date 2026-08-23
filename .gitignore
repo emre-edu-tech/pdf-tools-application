@@ -1,7 +1,36 @@
-venv/
+# -------------------
+# Python General
+# -------------------
 __pycache__/
-node_modules/
-app/static/css/dist/output.css
-.env
-instance/
+*.py[cod]
 *.pyc
+*.pyo
+*.pyd
+*.pdb
+*.so
+*.egg-info/
+.env/
+.venv/
+venv/
+
+# -------------------
+# Flask Development (Local only)
+# -------------------
+.flaskenv
+
+# -------------------
+# Environment Config
+# -------------------
+.env
+
+# -------------------
+# OS Specific
+# -------------------
+.DS_Store
+Thumbs.db
+
+# -------------------
+# NPM Specific
+# -------------------
+node_modules
+instance/
