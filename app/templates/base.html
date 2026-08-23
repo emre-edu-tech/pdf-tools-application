@@ -6,7 +6,13 @@
     <title>{% block title %}PDF Toolkit{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dist/output.css') }}">
 </head>
-<body>
-    {% block content %}{% endblock %}
+<body class="min-h-screen flex flex-col bg-ink-50 font-sans text-ink-900 antialiased">
+    {% include "partials/nav.html" %}
+    {% include "partials/flash.html" %}
+    <main class="flex-1">
+        {% block content %}{% endblock %}
+    </main>
+    {% include "partials/footer.html" %}
+    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
 </body>
 </html>

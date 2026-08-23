@@ -1,0 +1,31 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div id="flash-container" class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-4 space-y-2">
+      {% for category, message in messages %}
+        {% if category == 'success' %}
+          {% set border = 'border-green-500' %}
+          {% set bg = 'bg-green-50' %}
+          {% set text = 'text-green-800' %}
+        {% elif category == 'error' %}
+          {% set border = 'border-red-500' %}
+          {% set bg = 'bg-red-50' %}
+          {% set text = 'text-red-800' %}
+        {% elif category == 'warning' %}
+          {% set border = 'border-amber-500' %}
+          {% set bg = 'bg-amber-50' %}
+          {% set text = 'text-amber-800' %}
+        {% else %}
+          {% set border = 'border-ink-300' %}
+          {% set bg = 'bg-ink-50' %}
+          {% set text = 'text-ink-800' %}
+        {% endif %}
+        <div class="flash-message flex items-center justify-between gap-4 px-4 py-3 rounded-lg border-l-4 {{ border }} {{ bg }} {{ text }} shadow-sm transition-opacity duration-500" role="alert">
+          <span class="text-sm font-medium">{{ message }}</span>
+          <button type="button" class="flash-close flex-shrink-0 opacity-60 hover:opacity-100 transition" aria-label="Dismiss">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}

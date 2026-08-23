@@ -1,0 +1,35 @@
+<nav class="sticky top-0 z-50 bg-ink-900 text-white">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-14">
+      <a href="/" class="text-lg font-semibold tracking-tight hover:text-accent-200 transition">PDF Toolkit</a>
+
+      <!-- Desktop links -->
+      <div class="hidden sm:flex items-center gap-6">
+        <a href="/compress-pdf"
+           class="text-sm font-medium pb-1 border-b-2 transition {% if request.path == '/compress-pdf' %}border-accent-400 text-white{% else %}border-transparent text-gray-300 hover:text-white hover:border-accent-400{% endif %}">Compress PDF</a>
+        <a href="/split-pdf"
+           class="text-sm font-medium pb-1 border-b-2 transition {% if request.path == '/split-pdf' %}border-accent-400 text-white{% else %}border-transparent text-gray-300 hover:text-white hover:border-accent-400{% endif %}">Split PDF</a>
+      </div>
+
+      <!-- Hamburger button (mobile) -->
+      <button id="nav-toggle" type="button" class="sm:hidden inline-flex items-center justify-center p-2 rounded-lg hover:bg-ink-800 transition focus:outline-none focus:ring-2 focus:ring-accent-400" aria-controls="mobile-menu" aria-expanded="false" aria-label="Toggle navigation">
+        <svg id="nav-icon-open" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>
+        <svg id="nav-icon-close" class="h-5 w-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Mobile menu -->
+  <div id="mobile-menu" class="hidden sm:hidden border-t border-ink-800">
+    <div class="px-4 py-3 space-y-1">
+      <a href="/compress-pdf"
+         class="block px-3 py-2 rounded-lg text-sm font-medium transition {% if request.path == '/compress-pdf' %}bg-ink-800 text-accent-400{% else %}text-gray-300 hover:bg-ink-800 hover:text-white{% endif %}">Compress PDF</a>
+      <a href="/split-pdf"
+         class="block px-3 py-2 rounded-lg text-sm font-medium transition {% if request.path == '/split-pdf' %}bg-ink-800 text-accent-400{% else %}text-gray-300 hover:bg-ink-800 hover:text-white{% endif %}">Split PDF</a>
+    </div>
+  </div>
+</nav>
