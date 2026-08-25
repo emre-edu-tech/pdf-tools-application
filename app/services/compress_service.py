@@ -1,11 +1,9 @@
 import io
-
-import pikepdf
-from PIL import Image
-
-JPEG_QUALITY = 60
-MAX_IMAGE_DIMENSION = 1600
-MIN_IMAGE_DIMENSION_TO_PROCESS = 100
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 
 
 class CompressionError(Exception):
@@ -14,174 +12,162 @@ class CompressionError(Exception):
     pass
 
 
-def compress_pdf(input_stream) -> io.BytesIO:
-    """
-    Compress a PDF by recompressing embedded images and recompressing the PDF structure.
-
-    Uses pikepdf (qpdf) + Pillow. Everything stays in memory.
-
-    :param input_stream: file-like object opened for reading (e.g. Flask's file.stream)
-    :return: BytesIO seeked to 0 containing the compressed PDF
-    :raises CompressionError: for password-protected or invalid PDFs (user-facing message)
-    """
-    # Ensure stream is at start if possible
+def _find_gs_binary() -> str:
+    override = os.environ.get("GHOSTSCRIPT_BINARY")
+    if override:
+        return override
+    # Also check Flask config if available (for Passenger where env may be via Flask)
     try:
-        input_stream.seek(0)
+        from flask import current_app
+
+        if current_app:
+            cfg_val = current_app.config.get("GHOSTSCRIPT_BINARY")
+            if cfg_val:
+                return cfg_val
     except Exception:
         pass
+    candidates = ["gswin64c", "gswin32c"] if sys.platform == "win32" else ["gs"]
+    for name in candidates:
+        path = shutil.which(name)
+        if path:
+            return path
+    raise CompressionError(
+        "Ghostscript isn't installed on this server. Install the Ghostscript "
+        "binary and make sure it's on PATH, or set the GHOSTSCRIPT_BINARY "
+        "environment variable to its full path."
+    )
 
+
+def compress_pdf(input_stream) -> io.BytesIO:
+    """
+    Compress a PDF by shelling out to Ghostscript's pdfwrite device.
+
+    Writes the uploaded PDF to a temporary file, calls Ghostscript to re-render
+    it with aggressive compression settings, reads the result back into memory,
+    and cleans up all temp files.
+
+    :param input_stream: file-like object opened for reading (e.g. Flask's file.stream or BytesIO)
+    :return: BytesIO seeked to 0 containing the compressed PDF
+    :raises CompressionError: for password-protected, invalid PDFs, timeouts, or missing Ghostscript binary
+    """
+    gs_binary = _find_gs_binary()
+
+    # Use TemporaryDirectory so Ghostscript can seek within input/output files.
+    tmpdir_obj = tempfile.TemporaryDirectory()
     try:
-        pdf = pikepdf.open(input_stream)
-    except pikepdf.PasswordError:
-        raise CompressionError("This PDF is password-protected. Remove the password before compressing.")
-    except pikepdf.PdfError:
-        raise CompressionError("This file doesn't look like a valid PDF and couldn't be opened.")
-    except Exception as e:
-        # Fallback: treat any open failure as invalid PDF if not password
-        # but re-raise CompressionError for known messages; otherwise let it bubble?
-        # Spec says catch PasswordError and PdfError only. We re-wrap PdfError-like.
-        raise CompressionError("This file doesn't look like a valid PDF and couldn't be opened.") from e
+        tmpdir = tmpdir_obj.name
+        input_path = os.path.join(tmpdir, "input.pdf")
+        output_path = os.path.join(tmpdir, "output.pdf")
 
-    with pdf:
-        for page in pdf.pages:
-            # page.images is deprecated in favor of get_images, but spec mandates page.images.values()
-            # Keep compatibility: try page.images, fallback to get_images()
-            try:
-                images = page.images
-            except AttributeError:
-                images = page.get_images()
+        # Ensure input_stream is at start
+        try:
+            input_stream.seek(0)
+        except Exception:
+            pass
 
-            # images is a mapping of name -> Stream object
-            # Use list() to avoid mutation issues while iterating
-            for raw_image in list(images.values()):
-                # Skip images with transparency (soft mask)
-                if pikepdf.Name("/SMask") in raw_image:
-                    continue
+        # Read all bytes from input_stream
+        try:
+            data = input_stream.read()
+        except Exception as exc:
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.") from exc
 
-                # Wrap in PdfImage to inspect dimensions
-                try:
-                    pdf_image = pikepdf.PdfImage(raw_image)
-                except Exception:
-                    continue
+        # input_stream.read() may return None or str in edge cases
+        if data is None:
+            data = b""
+        if isinstance(data, str):
+            data = data.encode()
 
-                # Skip small icons/logos
-                # Skip if longest side is smaller than threshold
-                if max(pdf_image.width, pdf_image.height) < MIN_IMAGE_DIMENSION_TO_PROCESS:
-                    continue
+        if len(data) == 0:
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.")
 
-                # Decode via Pillow
-                try:
-                    pil_image = pdf_image.as_pil_image()
-                except Exception:
-                    continue
+        # Write input to temp file
+        with open(input_path, "wb") as f:
+            f.write(data)
 
-                # Downscale if larger than needed for on-screen viewing
-                try:
-                    if max(pil_image.size) > MAX_IMAGE_DIMENSION:
-                        # Use thumbnail to preserve aspect ratio; LANCZOS for quality
-                        pil_image.thumbnail(
-                            (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
-                            Image.LANCZOS,
-                        )
+        cmd = [
+            gs_binary,
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-dPDFSETTINGS=/ebook",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
+            "-dSAFER",
+            "-dDetectDuplicateImages=true",
+            "-dCompressFonts=true",
+            "-dSubsetFonts=true",
+            "-dAutoRotatePages=/None",
+            "-dColorImageDownsampleType=/Bicubic",
+            "-dColorImageResolution=120",
+            "-dGrayImageDownsampleType=/Bicubic",
+            "-dGrayImageResolution=120",
+            "-dMonoImageDownsampleType=/Bicubic",
+            "-dMonoImageResolution=300",
+            f"-sOutputFile={output_path}",
+            input_path,
+        ]
 
-                    # Handle transparency / modes: JPEG does not support alpha
-                    if pil_image.mode in ("RGBA", "LA"):
-                        background = Image.new("RGB", pil_image.size, (255, 255, 255))
-                        # paste using alpha channel as mask
-                        try:
-                            alpha = pil_image.split()[-1]
-                        except Exception:
-                            alpha = None
-                        if alpha is not None:
-                            background.paste(pil_image, mask=alpha)
-                        else:
-                            background.paste(pil_image)
-                        pil_image = background
-                    elif pil_image.mode == "P":
-                        # Palette images: convert via RGBA to handle transparency properly
-                        if "transparency" in pil_image.info:
-                            pil_image = pil_image.convert("RGBA")
-                            background = Image.new("RGB", pil_image.size, (255, 255, 255))
-                            background.paste(pil_image, mask=pil_image.split()[-1])
-                            pil_image = background
-                        else:
-                            pil_image = pil_image.convert("RGB")
-                    elif pil_image.mode not in ("RGB", "L"):
-                        # Convert other modes (CMYK, etc.) to RGB for JPEG
-                        # Keep L (grayscale) as RGB? JPEG supports L but we normalize to RGB for simplicity
-                        # We'll convert everything not RGB to RGB; if L we could keep L but spec says update ColorSpace to DeviceRGB
-                        pil_image = pil_image.convert("RGB")
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired as exc:
+            raise CompressionError("This PDF took too long to compress and was skipped.") from exc
+        except FileNotFoundError as exc:
+            raise CompressionError(
+                "Ghostscript isn't installed on this server. Install the Ghostscript "
+                "binary and make sure it's on PATH, or set the GHOSTSCRIPT_BINARY "
+                "environment variable to its full path."
+            ) from exc
 
-                    # Ensure RGB for JPEG if not L – we convert L to RGB as well to match spec's ColorSpace update
-                    if pil_image.mode == "L":
-                        pil_image = pil_image.convert("RGB")
+        # Decode combined stderr+stdout for error inspection (Ghostscript may write password/error to either stream)
+        combined_text = ""
+        try:
+            stderr_decoded = result.stderr.decode("utf-8", errors="ignore") if result.stderr else ""
+        except Exception:
+            stderr_decoded = str(result.stderr) if result.stderr else ""
+        try:
+            stdout_decoded = result.stdout.decode("utf-8", errors="ignore") if result.stdout else ""
+        except Exception:
+            stdout_decoded = str(result.stdout) if result.stdout else ""
+        combined_text = (stderr_decoded + " " + stdout_decoded).lower()
 
-                    # Re-encode as JPEG
-                    jpeg_buffer = io.BytesIO()
-                    pil_image.save(
-                        jpeg_buffer,
-                        format="JPEG",
-                        quality=JPEG_QUALITY,
-                        optimize=True,
-                    )
-                    jpeg_bytes = jpeg_buffer.getvalue()
-                except Exception:
-                    # If Pillow fails, leave image untouched
-                    try:
-                        pil_image.close()
-                    except Exception:
-                        pass
-                    continue
-                finally:
-                    # Close pil_image if it has close method and wasn't reassigned?
-                    pass
+        # Password check takes precedence regardless of returncode (Ghostscript 10.x returns 0 but logs password to stderr/stdout)
+        if "password" in combined_text:
+            raise CompressionError("This PDF is password-protected. Remove the password before compressing.")
 
-                # Only replace if actually smaller
-                try:
-                    original_len = len(raw_image.read_raw_bytes())
-                except Exception:
-                    try:
-                        original_len = len(raw_image.get_stream_buffer())
-                    except Exception:
-                        original_len = None
+        if result.returncode != 0:
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.")
 
-                if original_len is not None and len(jpeg_bytes) >= original_len:
-                    continue
+        # Even with returncode 0, Ghostscript can log "No pages will be processed" for truncated/invalid PDFs
+        # while still producing a tiny output file. Treat that as invalid.
+        if "no pages will be processed" in combined_text or "couldn't initialise file" in combined_text or "unrecoverable error" in combined_text:
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.")
+        # Generic error string fallback when rc==0 but Ghostscript still reported an error
+        if "error" in combined_text and combined_text.strip() != "":
+            # Only trigger if output is suspiciously small or combined contains error keywords
+            # Valid PDFs produce empty combined_text with -dQUIET, so this won't false-positive.
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.")
 
-                # Replace image data
-                try:
-                    raw_image.write(jpeg_bytes, filter=pikepdf.Name("/DCTDecode"))
-                except Exception:
-                    continue
+        # Check output file exists and is non-empty
+        if not os.path.exists(output_path):
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.")
+        try:
+            out_size = os.path.getsize(output_path)
+        except Exception:
+            out_size = 0
+        if out_size == 0:
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.")
 
-                # Update metadata to match new JPEG
-                # Use pil_image.size which reflects thumbnail size
-                new_width, new_height = pil_image.size
-                raw_image[pikepdf.Name("/Width")] = new_width
-                raw_image[pikepdf.Name("/Height")] = new_height
-                raw_image[pikepdf.Name("/ColorSpace")] = pikepdf.Name("/DeviceRGB")
-                raw_image[pikepdf.Name("/BitsPerComponent")] = 8
+        with open(output_path, "rb") as f:
+            out_bytes = f.read()
 
-                # Remove DecodeParms which is not valid for DCTDecode
-                if pikepdf.Name("/DecodeParms") in raw_image:
-                    del raw_image[pikepdf.Name("/DecodeParms")]
-                # Also remove Interpolate if present? Keep as is – not harmful
+        if len(out_bytes) == 0:
+            raise CompressionError("This file doesn't look like a valid PDF and couldn't be processed.")
 
-                # Ensure Filter is exactly /DCTDecode (write already sets it)
-                # For images that had an array of filters, write will overwrite
-
-                # Close pil_image to free memory
-                try:
-                    pil_image.close()
-                except Exception:
-                    pass
-
-        output = io.BytesIO()
-        pdf.save(
-            output,
-            compress_streams=True,
-            stream_decode_level=pikepdf.StreamDecodeLevel.generalized,
-            object_stream_mode=pikepdf.ObjectStreamMode.generate,
-        )
+        output = io.BytesIO(out_bytes)
         output.seek(0)
         return output
+    finally:
+        try:
+            tmpdir_obj.cleanup()
+        except Exception:
+            pass
