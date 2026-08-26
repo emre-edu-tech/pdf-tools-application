@@ -2,4 +2,4 @@ Each step file recaps just enough context to stand alone — but since a fresh s
 
 > Inspect the existing project tree before writing anything related to the current spec file that you read.
 
-*"Read `docs/spec/spec-step.md` and implement it."*
+**"Read `docs/spec/spec-step.md` and implement it."**

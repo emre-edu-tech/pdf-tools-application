@@ -10,9 +10,11 @@ def create_app():
     # Register blueprints
     from app.blueprints.main import main_bp
     from app.blueprints.compress import compress_bp
+    from app.blueprints.split import split_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(compress_bp)
+    app.register_blueprint(split_bp)
 
     @app.errorhandler(404)
     def not_found(_error):
