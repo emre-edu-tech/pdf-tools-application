@@ -14,6 +14,8 @@ document.addEventListener("DOMContentLoaded", function () {
     return;
   }
 
+  var MAX_BYTES = 50 * 1024 * 1024; // 50 MB — keep in sync with app/config.py & .env.example
+
   function showError(msg) {
     if (!errorArea) return;
     errorArea.textContent = msg;
@@ -35,11 +37,12 @@ document.addEventListener("DOMContentLoaded", function () {
   function setLoading(isLoading) {
     if (isLoading) {
       splitBtn.disabled = true;
-      if (btnText) btnText.textContent = "Splitting\u2026";
+      if (btnText) btnText.textContent = "Splitting…";
       if (btnSpinner) btnSpinner.classList.remove("hidden");
     } else {
       var hasFile = fileInput.files && fileInput.files.length > 0;
-      splitBtn.disabled = !hasFile;
+      var oversized = hasFile && fileInput.files[0].size > MAX_BYTES;
+      splitBtn.disabled = !hasFile || oversized;
       if (btnText) btnText.textContent = "Split PDF";
       if (btnSpinner) btnSpinner.classList.add("hidden");
     }
@@ -149,6 +152,14 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
+    // Client-side size check — instant feedback, no network round trip
+    if (file.size > MAX_BYTES) {
+      showError("File is too large (" + formatSize(file.size) + "). Maximum allowed size is 50 MB.");
+      if (preview) preview.classList.add("hidden");
+      splitBtn.disabled = true;
+      return;
+    }
+
     if (previewName) previewName.textContent = file.name;
     if (previewSize) previewSize.textContent = formatSize(file.size);
     if (preview) preview.classList.remove("hidden");
@@ -173,6 +184,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       showError("Please select a PDF file (.pdf).");
+      return;
+    }
+
+    // Defensive second gate for size
+    if (file.size > MAX_BYTES) {
+      showError("File is too large (" + formatSize(file.size) + "). Maximum allowed size is 50 MB.");
       return;
     }
 
@@ -226,6 +243,17 @@ document.addEventListener("DOMContentLoaded", function () {
             }, 1000);
           });
         } else {
+          if (response.status === 413) {
+            return response
+              .json()
+              .then(function (data) {
+                var msg = (data && data.error) || "File is too large. Maximum allowed size is 50 MB.";
+                showError(msg);
+              })
+              .catch(function () {
+                showError("File is too large. Maximum allowed size is 50 MB.");
+              });
+          }
           return response
             .json()
             .then(function (data) {

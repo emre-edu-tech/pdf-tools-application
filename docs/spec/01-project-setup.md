@@ -8,9 +8,13 @@ This is a brand-new project — create everything from scratch, **directly in th
 
 Tech stack for this project overall:
 - Backend: Python 3, **Flask 3.1.x** (latest stable 3.x), app factory pattern, one blueprint per feature.
+- PDF splitting: **pypdf 6.1.x** (pure Python, pip-installable — `PdfReader`/`PdfWriter` in-memory via `io.BytesIO`, no system dependency).
+- PDF compression: **Ghostscript 10.x** system binary (AGPL, invoked via `subprocess` + `pdfwrite` device — **not** a pip package, installed separately per platform; see Step 3 / `README.md` for `gswin64c`/`gs` install and `GHOSTSCRIPT_BINARY` override).
 - Styling: **Tailwind CSS 3.4.x**, installed via `npm install -D tailwindcss@3` — not the CDN build, compiled to a static file.
 - Frontend: vanilla JS, no framework, no bundler beyond the Tailwind CLI.
 - This step only builds the skeleton and the `main` blueprint. Later steps will add `compress` and `split` blueprints themselves — do not build them now.
+
+> **Why Ghostscript + pypdf (not pure-Python for both):** an earlier pure-Python attempt at compression (`pikepdf` recompressing images object-by-object, `Pillow` downsampling) fell well short of the target ratio on image-heavy PDFs. Ghostscript's `pdfwrite` device re-renders the whole PDF in one pass (image downsampling + font subsetting + stream recompression) and lands much closer to tools like iLovePDF. Splitting deliberately stays on `pypdf` — it is fully in-memory with no temp files, while Ghostscript would reintroduce temp files and subprocess parsing for no quality benefit on page extraction. See `docs/spec/00-overview.md` for the full rationale and AGPL note.
 
 ## Tasks
 
@@ -43,38 +47,38 @@ README.md
 ```
 
 2. **Python environment**
-   - **Requires Python 3.10 or newer** — the `pikepdf` library used for Compress in Step 3 needs 3.10+, so confirm this now before creating the venv (`python --version` or `python3 --version`).
-   - `requirements.txt` pinned: `Flask==3.1.3`, `python-dotenv==1.0.1` (or the current latest 1.x — pin whatever `pip install` actually resolves, but keep it pinned exactly).
+   - **Requires Python 3.10 or newer** — `pypdf` 6.1.x (used for Split in Step 4, `app/services/split_service.py`) supports Python 3.8+ but the project standardizes on **3.10+** for consistency with modern syntax and with the earlier toolchain; confirm this now before creating the venv (`python --version` or `python3 --version`).
+   - `requirements.txt` pinned: `Flask==3.1.3`, `python-dotenv==1.0.1`, `pypdf==6.1.2` (or the current latest — pin whatever `pip install` actually resolves, but keep it pinned exactly). **No pip entry for Ghostscript** — it is a system binary used for Compress in Step 3 (`app/services/compress_service.py` via `subprocess`) and must be installed separately (`gswin64c` on Windows, `gs` on macOS/Linux); see Step 3 and `README.md` §6 for per-platform install commands, version tested (`10.07.1`), and the `GHOSTSCRIPT_BINARY` env override for Passenger/Plesk where `PATH` may not resolve.
    - Instructions (put in README, see task 10) for: `python -m venv venv`, activation on both macOS/Linux (`source venv/bin/activate`) and Windows (`venv\Scripts\activate`), then `pip install -r requirements.txt`.
 
 3. **Flask app factory** (`app/__init__.py`):
    - `create_app()` function that: loads config from `app/config.py`, registers the `main` blueprint, and returns the app.
-   - `app/config.py`: a `Config` class that loads `SECRET_KEY`, `MAX_CONTENT_LENGTH` (default e.g. `25 * 1024 * 1024`, i.e. 25MB) from environment variables via `python-dotenv`, with sane local-dev fallbacks.
+   - `app/config.py`: a `Config` class that loads `SECRET_KEY`, `MAX_CONTENT_LENGTH` (default `50 * 1024 * 1024`, i.e. 50 MB / `52428800` bytes) from environment variables via `python-dotenv`, with sane local-dev fallbacks. Client-side JS (`compress.js`/`split.js`) enforces the same `50 * 1024 * 1024` limit with an instant warning before upload, and the server returns `413` with JSON/HTML if exceeded.
 
 4. **Main blueprint** (`app/blueprints/main/routes.py`): a single `/` route rendering `index.html`. This is a **temporary placeholder** — real homepage content comes in Step 2.
 
 5. **Entry points** — two separate files, two separate purposes:
    - **`app.py`** (local dev entry point, what you actually run): imports `create_app`, creates the app instance, runs it when executed directly — `if __name__ == "__main__": app.run(debug=True)`.
    - **`wsgi.py`** (deployment-only, for a Plesk server running Phusion Passenger): create it with **exactly** this content — it's adapted from a known-working file from a prior Plesk/Passenger deployment, so don't improvise a different version:
-     ```python
-     import sys
-     import os
+      ```python
+      import sys
+      import os
 
-     # Set the project root directory
-     project_home = os.path.dirname(__file__)
-     sys.path.insert(0, project_home)
+      # Set the project root directory
+      project_home = os.path.dirname(__file__)
+      sys.path.insert(0, project_home)
 
-     # Set Python interpreter to your venv
-     INTERP = os.path.join(project_home, "venv", "bin", "python3")
-     if sys.executable != INTERP:
-         os.execl(INTERP, INTERP, *sys.argv)
+      # Set Python interpreter to your venv
+      INTERP = os.path.join(project_home, "venv", "bin", "python3")
+      if sys.executable != INTERP:
+          os.execl(INTERP, INTERP, *sys.argv)
 
-     # Import the app factory and create the application instance
-     from app import create_app
+      # Import the app factory and create the application instance
+      from app import create_app
 
-     application = create_app()
-     ```
-     This file is Plesk/Passenger-server-specific and is **not** expected to run or import cleanly on a local dev machine — the hard-coded `venv/bin/python3` path is a Linux/macOS venv layout, so on Windows (or anywhere without a `venv/` yet) the interpreter re-exec will fail outright. That's expected; don't "fix" it to make it runnable locally, and don't wire it into any local run command.
+      application = create_app()
+      ```
+      This file is Plesk/Passenger-server-specific and is **not** expected to run or import cleanly on a local dev machine — the hard-coded `venv/bin/python3` path is a Linux/macOS venv layout, so on Windows (or anywhere without a `venv/` yet) the interpreter re-exec will fail outright. That's expected; don't "fix" it to make it runnable locally, and don't wire it into any local run command.
 
 6. **Tailwind pipeline**:
    - `package.json` with `tailwindcss` (v3, exact pinned version) as a dev dependency.
@@ -88,20 +92,21 @@ README.md
 
 8. **`.gitignore`**: `venv/`, `__pycache__/`, `node_modules/`, `app/static/css/dist/output.css`, `.env`, `instance/`, `*.pyc`.
 
-9. **`.env.example`**: `SECRET_KEY=change-me`, `MAX_CONTENT_LENGTH=26214400` (25MB in bytes), `FLASK_DEBUG=1` — `FLASK_DEBUG=1` is **local-dev only** (enables auto-reload + Werkzeug interactive debugger; must be `0`/unset in production via `wsgi.py`). `SECRET_KEY` is the HMAC key Flask uses to sign session cookies/`flash`/CSRF tokens — the placeholder `change-me` (and `dev-secret-key-change-me` fallback in `app/config.py`) is dev-only and must be replaced with a cryptographically strong value: `python -c "import secrets; print(secrets.token_hex(32))"` (64 hex chars = 32 bytes / 256-bit, `secrets.token_urlsafe(32)` or `openssl rand -hex 32` as alternatives), different per environment, never committed (`.env` is in `.gitignore`).
+9. **`.env.example`**: `SECRET_KEY=change-me`, `MAX_CONTENT_LENGTH=52428800` (50 MB in bytes — increased from 25 MB; `50 * 1024 * 1024`), `FLASK_DEBUG=1` — `FLASK_DEBUG=1` is **local-dev only** (enables auto-reload + Werkzeug interactive debugger; must be `0`/unset in production via `wsgi.py`). `SECRET_KEY` is the HMAC key Flask uses to sign session cookies/`flash`/CSRF tokens — the placeholder `change-me` (and `dev-secret-key-change-me` fallback in `app/config.py`) is dev-only and must be replaced with a cryptographically strong value: `python -c "import secrets; print(secrets.token_hex(32))"` (64 hex chars = 32 bytes / 256-bit, `secrets.token_urlsafe(32)` or `openssl rand -hex 32` as alternatives), different per environment, never committed (`.env` is in `.gitignore`). `413` handling returns JSON for AJAX and `errors/413.html` for direct posts when the 50 MB limit is exceeded; client-side `compress.js`/`split.js` show an instant `"File is too large (X MB). Maximum allowed size is 50 MB."` warning and keep the action button disabled without a round trip.
 
-10. **`README.md`** (stub, expanded fully in Step 5): project name/one-line description, and exact setup commands in order: create venv → activate → `pip install -r requirements.txt` → `npm install` → `npm run build:css` → copy `.env.example` to `.env` → generate `SECRET_KEY` via `secrets` (`python -c "import secrets; print(secrets.token_hex(32))"` / `openssl rand -hex 32`) and paste into `.env` → `python app.py` (or `flask run`). Must document that `FLASK_DEBUG=1` is local-dev only (debug auto-reload + interactive debugger → RCE if exposed; production `0`/unset via `wsgi.py`) and how to generate `SECRET_KEY` securely (32 bytes / `secrets` CSPRNG, per-env, never committed).
+10. **`README.md`** (stub, expanded fully in Step 5): project name/one-line description, and exact setup commands in order: create venv → activate → `pip install -r requirements.txt` → `npm install` → `npm run build:css` → copy `.env.example` to `.env` → generate `SECRET_KEY` via `secrets` (`python -c "import secrets; print(secrets.token_hex(32))"` / `openssl rand -hex 32`) and paste into `.env` → `python app.py` (or `flask run`). Must document that `FLASK_DEBUG=1` is local-dev only (debug auto-reload + interactive debugger → RCE if exposed; production `0`/unset via `wsgi.py`) and how to generate `SECRET_KEY` securely (32 bytes / `secrets` CSPRNG, per-env, never committed). Full Ghostscript install docs (`gswin64c --version` / `brew install ghostscript` / `apt-get install ghostscript`, tested `10.07.1`, `GHOSTSCRIPT_BINARY` override) are added in Step 3 and summarized in `README.md` §6 — Step 1 only needs to note that Ghostscript is a system binary, not in `requirements.txt`.
 
 ## Definition of Done
-- [ ] `python -m venv venv` + activation works; `pip install -r requirements.txt` succeeds with no errors
+- [ ] `python -m venv venv` + activation works; `pip install -r requirements.txt` succeeds with no errors (installs `Flask`, `python-dotenv`, **and `pypdf`**; Ghostscript is not pip-installable and is verified separately in Step 3)
 - [ ] `app/`, `requirements.txt`, `app.py`, etc. sit directly in the project root — no extra wrapping folder (e.g. `pdf-toolkit/`) was created around them
 - [ ] `npm install` succeeds; `npm run build:css` produces a non-empty `app/static/css/dist/output.css`
 - [ ] `python app.py` (or `flask run`) starts the server with no errors or warnings about missing config
 - [ ] Visiting `http://127.0.0.1:5000/` shows a styled page — the heading is visibly using a Tailwind color/size utility, not default browser styling
 - [ ] `wsgi.py` exists with the exact content specified above (project-root path setup, venv interpreter re-exec, then `application = create_app()`) — this is a code-review check, not a run-it check: the file is expected to fail if you actually try to import or run it locally (that's the venv re-exec doing its job), so don't test it beyond confirming it matches
-- [ ] No `compress` or `split` blueprints, routes, or folders exist yet
+- [ ] No `compress` or `split` blueprints, routes, or folders exist yet (they will be added in Steps 3–4: `compress` via Ghostscript `app/services/compress_service.py`, `split` via `pypdf` `app/services/split_service.py`)
+- [ ] `requirements.txt` contains `pypdf==6.1.2` (or later pinned 6.x) and does **not** contain `pikepdf`/`Pillow` for compression — Ghostscript is documented as a system binary instead
 
 ## Out of Scope for This Step
-- Do not implement the Compress or Split features or their blueprints.
+- Do not implement the Compress or Split features or their blueprints (Compress will shell out to Ghostscript; Split will use `pypdf` — both are built in later steps).
 - Do not design the final homepage cards — that's Step 2.
 - Do not add any file upload handling.

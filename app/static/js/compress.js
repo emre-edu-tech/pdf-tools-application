@@ -12,6 +12,8 @@ document.addEventListener("DOMContentLoaded", function () {
     return;
   }
 
+  var MAX_BYTES = 50 * 1024 * 1024; // 50 MB — keep in sync with app/config.py & .env.example
+
   function showError(msg) {
     if (!errorArea) return;
     errorArea.textContent = msg;
@@ -36,9 +38,10 @@ document.addEventListener("DOMContentLoaded", function () {
       if (btnText) btnText.textContent = "Compressing…";
       if (btnSpinner) btnSpinner.classList.remove("hidden");
     } else {
-      // Re-enable only if file is selected
+      // Re-enable only if file is selected and not oversized
       var hasFile = fileInput.files && fileInput.files.length > 0;
-      compressBtn.disabled = !hasFile;
+      var oversized = hasFile && fileInput.files[0].size > MAX_BYTES;
+      compressBtn.disabled = !hasFile || oversized;
       if (btnText) btnText.textContent = "Compress PDF";
       if (btnSpinner) btnSpinner.classList.add("hidden");
     }
@@ -57,6 +60,14 @@ document.addEventListener("DOMContentLoaded", function () {
     // Extension check
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       showError("Please select a PDF file (.pdf).");
+      if (preview) preview.classList.add("hidden");
+      compressBtn.disabled = true;
+      return;
+    }
+
+    // Client-side size check — instant feedback, no network round trip
+    if (file.size > MAX_BYTES) {
+      showError("File is too large (" + formatSize(file.size) + "). Maximum allowed size is 50 MB.");
       if (preview) preview.classList.add("hidden");
       compressBtn.disabled = true;
       return;
@@ -82,6 +93,12 @@ document.addEventListener("DOMContentLoaded", function () {
     // Final extension sanity check
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       showError("Please select a PDF file (.pdf).");
+      return;
+    }
+
+    // Defensive second gate for size (covers programmatic bypass)
+    if (file.size > MAX_BYTES) {
+      showError("File is too large (" + formatSize(file.size) + "). Maximum allowed size is 50 MB.");
       return;
     }
 
@@ -127,6 +144,18 @@ document.addEventListener("DOMContentLoaded", function () {
             }, 1000);
           });
         } else {
+          // 413 has special message; server may return HTML if not detected as AJAX, so handle both
+          if (response.status === 413) {
+            return response
+              .json()
+              .then(function (data) {
+                var msg = (data && data.error) || "File is too large. Maximum allowed size is 50 MB.";
+                showError(msg);
+              })
+              .catch(function () {
+                showError("File is too large. Maximum allowed size is 50 MB.");
+              });
+          }
           // Failure: parse JSON error body
           return response
             .json()

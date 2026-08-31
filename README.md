@@ -68,9 +68,11 @@ cp .env.example .env
 
 ```
 SECRET_KEY=change-me
-MAX_CONTENT_LENGTH=26214400
+MAX_CONTENT_LENGTH=52428800
 FLASK_DEBUG=1
 ```
+
+> `MAX_CONTENT_LENGTH` is **50 MB** (`50 * 1024 * 1024 = 52428800` bytes, increased from 25 MB). The app rejects larger uploads with **413** (JSON `{"error": "File is too large. Maximum allowed size is 50 MB."}` for AJAX, HTML `errors/413.html` otherwise) and `compress.js`/`split.js` show an instant client-side warning — `"File is too large (X MB). Maximum allowed size is 50 MB."` — before any upload, keeping the action button disabled.
 
 * `FLASK_DEBUG=1` is **local-dev only** — do not set it in production (`wsgi.py` is used via Passenger). Debug mode enables auto-reload, verbose tracebacks, and the Werkzeug interactive debugger (arbitrary code execution if exposed). In production use `FLASK_DEBUG=0` or unset it.
 * Generate a secure `SECRET_KEY` — Flask uses it to HMAC-sign session cookies, `flash` messages, and CSRF tokens; a weak/predictable key allows session forgery:

@@ -17,15 +17,17 @@ Built to be extended later with more PDF tools (merge, watermark, PDF↔image, e
 |---|---|---|
 | Backend | Flask 3.1.x (latest stable 3.x) | App factory + blueprints pattern |
 | PDF splitting | `pypdf` 6.16.x | Pure Python, in-memory, no system dependency |
-| PDF compression | `pikepdf` 10.11.x + `Pillow` 12.3.x | In-memory image recompression/downsampling + structural PDF optimization — see Step 3 |
+| PDF compression | Ghostscript (system binary), invoked via `subprocess` | Re-renders the whole PDF via the `pdfwrite` device — image downsampling, font subsetting, and stream recompression in one pass — see Step 3 |
 | Styling | Tailwind CSS **v3 LTS** (3.4.x), installed via npm | Not the CDN build — compiled locally |
 | Frontend interactivity | Vanilla JS, `fetch()` + `FormData`, no framework | AJAX uploads, no full page reloads |
 | Env management | Python `venv` (mandatory) + `python-dotenv` | `.env` for secrets/config |
-| Package pinning | Exact versions in `requirements.txt` and `package.json` | Reproducible installs |
+| Package pinning | Exact versions in `requirements.txt` and `package.json` | Reproducible installs — doesn't apply to Ghostscript itself, since it isn't a pip package (see below) |
 
-**No system-level binaries required.** Both `pypdf` and `pikepdf` ship as self-contained pip wheels (pikepdf bundles its `qpdf` and `libjpeg-turbo` dependencies in the wheel itself) — nothing extra to install on Windows, macOS, or a Linux server. This was a deliberate change from an earlier draft of this spec that used Ghostscript: Ghostscript needs a separate OS-level install on every machine (including a different binary name, `gswin64c.exe`, on Windows) and its AGPL license explicitly restricts running it as a network service without open-sourcing the whole stack. Going pure-Python sidesteps both problems.
+**Ghostscript is a required system-level binary — the one exception to "everything's a pip install."** `pypdf` ships as a self-contained pip wheel with no system dependency, but Ghostscript has to be installed separately on every machine that runs this app: Windows (`gswin64c.exe`), macOS (`brew install ghostscript` → `gs`), and the production Ubuntu/Plesk server (`apt-get install ghostscript` → `gs`). Exact install commands per platform are in Step 3.
 
-**Python version note:** `pikepdf` requires **Python 3.10 or newer** — confirm this when creating the venv in Step 1.
+This was a deliberate choice, made after an earlier pure-Python attempt (`pikepdf` recompressing images object-by-object, `Pillow` downsampling them) fell well short of the target compression ratio on image-heavy PDFs. Ghostscript's `pdfwrite` device re-renders the whole PDF as one coherent pass and gets much closer to what a service like iLovePDF produces.
+
+**AGPL license note:** Ghostscript is licensed under the AGPL, which requires that if it's run as part of a network service, the complete corresponding source of the whole service be made available to anyone interacting with it over the network. That's satisfied here — this project is published as open source on GitHub — so there's no additional obligation beyond keeping the repo public.
 
 ## 3. MVP Feature Scope
 
@@ -36,7 +38,7 @@ Explicitly **out of scope** for v1 (documented, not built): merge PDFs, multi-ra
 ## 4. Architecture at a Glance
 
 - **App factory** (`create_app()`) + one **blueprint per feature** (`main`, `compress`, `split`).
-- **Stateless, no persistent file storage, no disk temp files at all.** Both features now process entirely in memory via `io.BytesIO` — `pikepdf` and `pypdf` both read from and write to in-memory streams natively, so there's no need for `tempfile.TemporaryDirectory()` anywhere in this app. The server never writes a user's PDF to disk, even temporarily.
+- **Stateless, no persistent file storage — temp files only where the tool requires them.** Splitting is fully in-memory: `pypdf` reads from and writes to `io.BytesIO` natively, so there's no `tempfile.TemporaryDirectory()` anywhere in the split blueprint. Compression is the one exception — Ghostscript's CLI needs real file paths, so the compress service writes the upload to a `tempfile.TemporaryDirectory()`, runs Ghostscript against it, reads the result back into memory, and deletes the temp directory in a `finally` block before the request completes. Either way, nothing persists past the lifetime of a single request — see Step 3 for the exact pattern.
 - **Tailwind CLI build step**: `static/css/src/input.css` → compiled to `static/css/dist/output.css`, linked directly from templates. No Flask-Assets, no bundler beyond the Tailwind CLI.
 - **AJAX flow**: JS submits `FormData` via `fetch()`; the server returns the processed PDF binary directly (`Content-Type: application/pdf`, `Content-Disposition: attachment`); JS reads it as a `Blob`, creates an object URL, and triggers the browser's save dialog. No server-side "processed file" storage or download tokens needed.
 
@@ -104,13 +106,13 @@ application = create_app()
 The only change from the original was the last two lines — the original imported an already-created Flask instance directly (`from app import app as application`), which only works when everything lives in one flat `app.py`. Here, `app` is a package built around `create_app()`, so `wsgi.py` imports the factory and calls it itself.
 
 **Why that one-line swap is actually sufficient, not just a cosmetic fix:**
-- The interpreter re-exec (`os.execl`) still has to run *before* anything Flask-related loads — and it does, because `from app import create_app` is the line that first triggers Flask (and later, Pillow/pikepdf) to load, whether that happens via top-level imports in `app/__init__.py` or inside `create_app()` itself. Since that import line comes strictly after the `os.execl` check in `wsgi.py`, the venv switch always happens first, exactly like in the original non-factory file.
+- The interpreter re-exec (`os.execl`) still has to run *before* anything Flask-related loads — and it does, because `from app import create_app` is the line that first triggers Flask (and later, `pypdf`, once the split blueprint's modules import it) to load, whether that happens via top-level imports in `app/__init__.py` or inside `create_app()` itself. Since that import line comes strictly after the `os.execl` check in `wsgi.py`, the venv switch always happens first, exactly like in the original non-factory file.
 - `create_app()` still only runs once. `os.execl` *replaces* the current process outright (not a fork/subprocess) — so if the interpreter doesn't match, execution never reaches the import line at all; it restarts from the top of `wsgi.py` under the correct interpreter, and *that* run is the one that reaches `from app import create_app` and calls it. There's no path where `create_app()` fires twice or where blueprints/config get double-registered.
 - Everything the factory pattern adds — blueprint registration, config loading from `.env` — is now encapsulated inside `create_app()` itself, so calling it once and handing the result to `application` is a complete equivalent of the original's "import an already-built instance."
 
 If you ever change `create_app()` to take an argument (e.g. an explicit `create_app("production")` for environment-specific config), `wsgi.py` would need `application = create_app("production")` instead — but as specified now, `create_app()` takes no arguments and reads everything from `.env`, so the parameterless call above is correct as-is.
 
-**This file is Plesk-server-specific and won't run locally** — the `venv/bin/python3` path is a Linux/macOS venv layout, so on a Windows dev machine (or before a `venv/` even exists) the interpreter re-exec will fail outright. That's expected: `wsgi.py` is only ever meant to run once Passenger loads it on the actual (Linux) server, never on your machine. Step 1 doesn't test-run it locally for that reason.
+**This file is Plesk-server-specific and won't run locally** — the `venv/bin/python3` path is a Linux/macOS venv layout, so on a Windows dev machine (or before a `venv/` even exists) the interpreter re-exec will fail outright. That's expected: `wsgi.py` is only ever meant to run once Passenger loads it on the actual (Linux) server, never on your machine. Step 1 doesn't test-run it locally for that reason. **Ghostscript itself must also be installed on that Plesk server** (see Step 3) — `wsgi.py` switching interpreters doesn't help if the `gs` binary isn't reachable from Passenger's process; confirm that separately, since Passenger may not inherit the same `PATH` an SSH session sees.
 
 ## 6. Design System
 
@@ -143,7 +145,8 @@ Exact Tailwind config code is given in Step 2.
 - App factory pattern; one blueprint per feature.
 - `.env` / `.env.example` for all config and secrets — nothing hardcoded, nothing committed.
 - `requirements.txt` and `package.json` use pinned, exact versions.
-- **Every** uploaded/processed file is handled entirely in memory (`io.BytesIO`) — never written to disk, even temporarily.
+- Uploaded/processed files stay in memory (`io.BytesIO`) wherever the tool allows it — true for the entire Split flow. Compression is the exception: Ghostscript requires real file paths, so it uses ephemeral temp files that are always cleaned up in a `finally` block and never persist past a single request (see Step 3).
+- Ghostscript's tested version isn't pinned via `requirements.txt` — it's a system binary, not a pip package. Document the version you built/tested against in `README.md` instead.
 - `MAX_CONTENT_LENGTH` set in Flask config to reject oversized uploads early.
 - Validate uploads by **both** extension and magic bytes (`%PDF-`) — never trust filename or MIME type alone.
 - `werkzeug.utils.secure_filename()` on any filename that reaches a response header or the filesystem.
