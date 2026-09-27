@@ -38,6 +38,17 @@ def _find_gs_binary() -> str:
     )
 
 
+# Tuned 2026-09: forces JPEG re-encoding (AutoFilter off + DCTEncode) with
+# QFactor 0.9, 96dpi color/gray, 300dpi mono. Verified 34.6MB slide deck -> ~3MB.
+# NOTE: raising color/gray resolution toward 150dpi can cross Ghostscript's
+# downsample threshold and silently disable compression (output ~= input size).
+GS_DISTILLER_PARAMS = (
+    "<< /ColorImageDict << /QFactor 0.9 /Blend 1 /HSample [2 1 1 2] /VSample [2 1 1 2] >> "
+    "/GrayImageDict << /QFactor 0.9 /Blend 1 /HSample [2 1 1 2] /VSample [2 1 1 2] >> "
+    ">> setdistillerparams"
+)
+
+
 def compress_pdf(input_stream) -> io.BytesIO:
     """
     Compress a PDF by shelling out to Ghostscript's pdfwrite device.
@@ -97,13 +108,25 @@ def compress_pdf(input_stream) -> io.BytesIO:
             "-dCompressFonts=true",
             "-dSubsetFonts=true",
             "-dAutoRotatePages=/None",
+            "-dCompressPages=true",
+            "-dDownsampleColorImages=true",
+            "-dDownsampleGrayImages=true",
+            "-dDownsampleMonoImages=true",
             "-dColorImageDownsampleType=/Bicubic",
-            "-dColorImageResolution=120",
+            "-dColorImageResolution=96",
             "-dGrayImageDownsampleType=/Bicubic",
-            "-dGrayImageResolution=120",
+            "-dGrayImageResolution=96",
             "-dMonoImageDownsampleType=/Bicubic",
             "-dMonoImageResolution=300",
+            "-dAutoFilterColorImages=false",
+            "-dColorImageFilter=/DCTEncode",
+            "-dAutoFilterGrayImages=false",
+            "-dGrayImageFilter=/DCTEncode",
+            "-dColorConversionStrategy=/LeaveColorUnchanged",
             f"-sOutputFile={output_path}",
+            "-c",
+            GS_DISTILLER_PARAMS,
+            "-f",
             input_path,
         ]
 
